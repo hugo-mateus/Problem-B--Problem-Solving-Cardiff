@@ -1,225 +1,192 @@
 # app.py
 import streamlit as st
-import streamlit.components.v1 as components
-import networkx as nx
-from pyvis.network import Network
-import random
+import pandas as pd
 import math
-import copy
 
-# Make sure your original code is in a file named simulation.py
+# Import the main class from your updated simulation.py
 try:
-    from simulation import GraphSimulation, NODE_CATEGORIES
+    from simulation import Simulation
 except ImportError:
-    st.error("Error: Could not find the 'simulation.py' file. Please make sure it is in the same directory as app.py.")
+    st.error("Error: Could not find `simulation.py`. Please make sure it is in the same directory.")
     st.stop()
 
-# --- Streamlit Page Configuration ---
-st.set_page_config(layout="wide")
-st.title("Interactive Infection Spread Sandbox")
+st.set_page_config(layout="wide", page_title="Comprehensive City Simulation")
+st.title("Multi-Scale City Infection Sandbox")
 
 # =============================================================================
-# --- Sidebar Configuration ---
+# Sidebar for User Configuration
 # =============================================================================
+st.sidebar.header("Simulation Configuration")
 
-# --- Part 1: Timeline Viewing Controls (These are always active) ---
-st.sidebar.header("1. View Timeline")
-# We need a default value for simulation_days if the config isn't set yet
-total_sim_days = st.session_state.get('config', {}).get('simulation_days', 3)
-selected_day = st.sidebar.slider("View Day", 0, total_sim_days, 0)
-turn_options = {0: "Initial State", 1: "T1 (Work/School)", 2: "T2 (Social)", 3: "End of Day (Home)"}
-selected_turn = st.sidebar.select_slider("View Turn of Day", options=list(turn_options.keys()), value=0, format_func=lambda x: turn_options[x])
-
-# --- Part 2: Simulation Setup Form ---
-st.sidebar.header("2. Configure and Run New Simulation")
 with st.sidebar.form(key='config_form'):
-    st.write("Set your parameters and click the button below.")
+    st.write("Set your parameters and click 'Run Simulation' at the bottom.")
 
-    # --- Population and Initial State ---
-    with st.expander("Population and Initial State", expanded=True):
-        total_population_input = st.slider("Total Population", 50, 500, 100, 10)
-        initial_infected_percentage_input = st.slider("Initial Infected Percentage", 0.01, 0.5, 0.1, 0.01)
+    # --- Section 1: Population & Initial State ---
+    with st.expander("Population & Initial State", expanded=True):
+        total_population = st.slider("Total Population", 1000, 50000, 10000, 1000)
+        age_of_population = st.selectbox("Population Age Structure", ['medium', 'young', 'old'])
+        percentage_infected = st.slider("Initial Infected (%)", 0.0, 10.0, 1.0, 0.1) / 100.0
+        percentage_removed = st.slider("Initial Immune/Removed (%)", 0.0, 50.0, 5.0, 1.0) / 100.0
 
-    # --- Node Counts ---
-    with st.expander("Community Structure (Node Counts)"):
-        category_counts_input = {}
-        for cat_code, cat_name in NODE_CATEGORIES.items():
-            category_counts_input[cat_code] = st.slider(
-                f"Number of {cat_name.capitalize()}s", 0, 50, 40 if cat_code == 'h' else 2, 1
-            )
+    # --- Section 2: Disease Characteristics ---
+    with st.expander("Disease Characteristics"):
+        # The user-controlled infectivity 'gamma' from the formula
+        infectivity = st.slider("Disease Infectivity (γ)", 0.001, 0.5, 0.05, 0.001, format="%.3f")
+        time_of_incubation = st.slider("Incubation Time (days)", 1, 14, 3)
+        time_of_activation = st.slider("Infection Duration (days)", 3, 30, 10)
+        percentage_of_death = st.slider("Mortality Rate (%)", 0.0, 10.0, 1.0, 0.1) / 100.0
+        detection_of_disease_rate = st.slider("Daily Detection Rate for Symptomatic (%)", 0.0, 100.0, 50.0, 1.0) / 100.0
 
-    # --- Disease and Environment Parameters ---
-    with st.expander("Disease and Environment Physics"):
-        gamma_input = st.slider("Disease Infectivity (γ)", 0.001, 0.1, 0.01, 0.001, format="%.3f")
-        emission_rate_input = st.slider("Particle Emission Rate (E)", 1.0, 20.0, 8.0, 0.5)
-        st.markdown("---")
-        st.write("Ventilation Rate (Air Changes per Hour)")
-        ach_input = {}
-        default_achs = {'h': 0.5, 'sh': 4.0, 'p': 50.0, 's': 3.0, 'r': 8.0, 'c': 1.0, 't': 6.0, 'H': 12.0, 'o': 6.0}
-        for cat_code, cat_name in NODE_CATEGORIES.items():
-            ach_input[cat_code] = st.slider(f"Ventilation for {cat_name.capitalize()}", 0.1, 60.0, default_achs[cat_code], 0.1)
-
-    # --- Simulation Time ---
-    simulation_days_input = st.slider("Total Simulation Days", 1, 30, 3)
-
-    # --- The "Run" button that submits all the form data ---
-    submitted = st.form_submit_button("Run / Update Simulation")
-
-
-# --- Store submitted configurations in session_state ---
-if submitted:
-    st.session_state.config = {
-        "total_population": total_population_input,
-        "initial_infected_percentage": initial_infected_percentage_input,
-        "category_counts": category_counts_input,
-        "gamma": gamma_input,
-        "emission_rate": emission_rate_input,
-        "ach": ach_input,
-        "simulation_days": simulation_days_input,
-        "seed": random.randint(0, 10000) # Generate a new seed for each new run
-    }
-    st.cache_data.clear()
-    st.success(f"New simulation configured with Seed: {st.session_state.config['seed']}. The timeline has been updated.")
-
-# --- Stop if no configuration has been submitted yet ---
-if 'config' not in st.session_state:
-    st.info("Please configure your simulation in the sidebar and click 'Run / Update Simulation'.")
-    st.stop()
-
-# =============================================================================
-# --- Main Application Logic (The rest of the file is the same) ---
-# =============================================================================
-
-# --- Helper Functions (Unchanged) ---
-def get_infection_color(infected, total):
-    if total == 0: return "#808080"
-    percentage = infected / total
-    red = int(255 * percentage)
-    green = int(128 * (1 - percentage))
-    return f"rgb({red},{green},0)"
-
-@st.cache_data(show_spinner="Generating graph...")
-def generate_pyvis_html(_simulation_state_dict, title):
-    nodes_data = _simulation_state_dict['nodes']
-    edges_data = _simulation_state_dict.get('edges', [])
-    G = nx.DiGraph()
-    category_edge_colors = {
-        'h': '#1f77b4', 'sh': '#ff7f0e', 'p': '#2ca02c', 's': '#d62728',
-        'r': '#9467bd', 'c': '#8c564b', 't': '#e377c2', 'H': '#7f7f7f', 'o': '#bcbd22'
-    }
-    for node_id, node_details in nodes_data.items():
-        infected, non_infected = node_details['population']['infected'], node_details['population']['non_infected']
-        total_pop = infected + non_infected
-        G.add_node(
-            node_id, label=f"{node_id}",
-            title=(f"Category: {NODE_CATEGORIES.get(node_details['category'], 'Unknown')}  " f"Infected: {infected}  Non-Infected: {non_infected}  Total: {total_pop}"),
-            color=get_infection_color(infected, total_pop), size=10 + total_pop / 2
-        )
-    for edge in edges_data:
-        source, dest, weight = edge['source'], edge['dest'], edge['weight']
-        dest_category = nodes_data[dest]['category']
-        G.add_edge(
-            source, dest, value=weight, title=f"{weight} people moved",
-            color=category_edge_colors.get(dest_category, '#cccccc')
-        )
-    net = Network(height="700px", width="100%", notebook=False, directed=True, bgcolor="#222222", font_color="white")
-    net.from_nx(G)
-    net.set_options("""
-    var options = {
-      "nodes": { "font": { "size": 16, "strokeWidth": 3, "strokeColor": "#222222" } },
-      "edges": { "arrows": { "to": { "enabled": true, "scaleFactor": 0.5 } }, "color": { "inherit": "to" }, "smooth": { "type": "continuous" } },
-      "physics": { "forceAtlas2Based": { "gravitationalConstant": -50, "centralGravity": 0.01, "springLength": 100 }, "minVelocity": 0.75, "solver": "forceAtlas2Based" }
-    }
-    """)
-    try:
-        return net.generate_html()
-    except Exception as e:
-        return f"<p>Error generating graph: {e}</p>"
-
-# --- Build the dynamic configurations from the stored state ---
-config = st.session_state.config
-random.seed(config['seed'])
-
-PHYSICS_PARAMS = {
-    'E': config['emission_rate'], 'rho': 1.3e-4, 'gamma': config['gamma'],
-    'categories': {cat: {'ACH': ach} for cat, ach in config['ach'].items()}
-}
-default_volumes = {'h': 230, 'sh': 1500, 'p': 1000000, 's': 450, 'r': 800, 'c': 3000, 't': 5000, 'H': 400, 'o': 1000}
-for cat_code in PHYSICS_PARAMS['categories']:
-    PHYSICS_PARAMS['categories'][cat_code]['V'] = default_volumes[cat_code]
-    PHYSICS_PARAMS['categories'][cat_code]['lambda'] = PHYSICS_PARAMS['categories'][cat_code]['ACH'] / 3600.0
-
-import simulation
-simulation.PHYSICS_PARAMS = PHYSICS_PARAMS
-
-try:
-    temp_sim = GraphSimulation(config['category_counts'], config['total_population'], config['initial_infected_percentage'])
-except (ValueError, ZeroDivisionError) as e:
-    st.error(f"Error initializing simulation: {e}. A common cause is setting the number of households to 0.")
-    st.stop()
-
-# --- Run simulation up to the selected point ---
-movement_edges = []
-duration_t1, duration_t2, duration_t3 = 8 * 3600, 4 * 3600, 12 * 3600
-
-if selected_day > 0 or selected_turn > 0:
-    temp_sim.apply_infection("Day 0, Initial Overnight", duration_t3)
-
-if selected_day > 0:
-    for day in range(1, selected_day + 1):
-        is_target_day = (day == selected_day)
+    # --- NEW: Section 3: Environment & Physics ---
+    with st.expander("Environment & Physics (Wells-Riley Model)"):
+        st.write("These parameters control the physical spread of airborne particles.")
+        emission_rate = st.slider("Particle Emission Rate (E)", 1.0, 20.0, 8.0, 0.5, help="Particles emitted per second by an infected person.")
         
-        if is_target_day and selected_turn == 1: movement_edges.clear()
-        locations_before_t1 = temp_sim.person_location.copy()
-        temp_sim.turn1(); temp_sim.apply_infection("T1", duration_t1)
-        if is_target_day and selected_turn == 1:
-            for pid, new_loc in temp_sim.person_location.items(): movement_edges.append({'source': locations_before_t1[pid], 'dest': new_loc})
-            break
+        st.markdown("---")
+        st.write("Ventilation Rate (Air Changes per Hour - ACH)")
+        # We define default ACH values which the user can then override.
+        default_achs = {'h': 0.5, 'sh': 4.0, 'p': 0.1, 's': 3.0, 'r': 8.0, 'c': 1.0, 't': 6.0, 'H': 12.0, 'o': 6.0, 'st': 8.0, 'pa': 2.0}
+        ach_input = {}
+        for cat_code, default_ach in default_achs.items():
+            ach_input[cat_code] = st.slider(f"Ventilation for {cat_code.capitalize()}", 0.1, 60.0, default_ach, 0.1)
+    
+    with st.expander("Room/Group Sizes"):
+        st.write("Control how many people mix in large locations.")
+        subgroup_sizes = {}
+        subgroup_sizes['s'] = st.slider("People per Classroom (Schools)", 10, 100, 30, 5)
+        subgroup_sizes['o'] = st.slider("People per Floor (Offices)", 10, 200, 50, 5)
+        subgroup_sizes['r'] = st.slider("People per Section (Restaurants)", 4, 50, 20, 2)
+        subgroup_sizes['H'] = st.slider("People per Ward (Hospitals)", 2, 50, 15, 1)
+        subgroup_sizes['st'] = st.slider("People per Section (Stadiums)", 20, 500, 100, 10)
+        subgroup_sizes['pa'] = st.slider("People per Group (Parties)", 10, 100, 40, 5)
+        subgroup_sizes['t'] = st.slider("People per Section (Theaters)", 20, 200, 75, 5)
+        subgroup_sizes['c'] = st.slider("People per Group (Churches)", 10, 100, 50, 5)
 
-        if is_target_day and selected_turn == 2: movement_edges.clear()
-        locations_before_t2 = temp_sim.person_location.copy()
-        temp_sim.turn2(); temp_sim.apply_infection("T2", duration_t2)
-        if is_target_day and selected_turn == 2:
-            for pid, new_loc in temp_sim.person_location.items(): movement_edges.append({'source': locations_before_t2[pid], 'dest': new_loc})
-            break
 
-        if is_target_day and selected_turn == 3: movement_edges.clear()
-        locations_before_t3 = temp_sim.person_location.copy()
-        temp_sim.turn3(); temp_sim.apply_infection("T3", duration_t3)
-        if is_target_day and selected_turn == 3:
-            for pid, new_loc in temp_sim.person_location.items(): movement_edges.append({'source': locations_before_t3[pid], 'dest': new_loc})
-            break
 
-# --- Display logic (unchanged) ---
-aggregated_edges = {}
-for edge in movement_edges:
-    key = (edge['source'], edge['dest'])
-    aggregated_edges[key] = aggregated_edges.get(key, 0) + 1
-final_edges_for_viz = [{'source': s, 'dest': d, 'weight': w} for (s, d), w in aggregated_edges.items()]
+    # --- Section 4: Interventions & Policies ---
+    with st.expander("Interventions & Policies"):
+        vaccination_percentage = st.slider("Vaccination Coverage (%)", 0.0, 100.0, 0.0, 5.0) / 100.0
+        vaccination_effectiveness = st.slider("Vaccine Effectiveness (%)", 0.0, 100.0, 90.0, 5.0) / 100.0
+        quarantine_on_detection = st.checkbox("Enforce Quarantine on Detection", True)
+    
+    with st.expander("Lockdown Policies (Turn On/Off Locations)"):
+        active_nodes = {}
+        for cat in ['o', 'sh', 'r', 'st', 'pa', 't', 'c', 's']:
+            active_nodes[cat] = st.checkbox(f"Allow {cat.capitalize()} to be open", True)
+        public_transport_on = st.checkbox("Public Transport Open", True)
 
-st.header(f"Graph State: Day {selected_day}, {turn_options[selected_turn]}")
-simulation_state_dict = {
-    'nodes': {nid: {'population': node.population, 'category': node.category} for nid, node in temp_sim.nodes.items()},
-    'edges': final_edges_for_viz
-}
-graph_html = generate_pyvis_html(simulation_state_dict, f"Day {selected_day} Turn {selected_turn}")
-with st.container():
-    components.html(graph_html, height=750, scrolling=False)
+    # --- Section 5: Simulation Duration ---
+    st.subheader("Simulation Duration")
+    numb_of_days = st.slider("Number of Days to Simulate", 1, 100, 30)
+    
+    run_button = st.form_submit_button(label="Run Simulation")
 
-with st.expander("Show Node Population Data"):
-    # ... (data display code remains the same)
+# =============================================================================
+# Main Application Logic
+# =============================================================================
 
-    st.subheader("Node Populations")
-    data_rows = []
-    for node_id in sorted(temp_sim.nodes.keys()):
-        node = temp_sim.nodes[node_id]
-        total = node.population['infected'] + node.population['non_infected']
-        if total > 0:
-            data_rows.append({
-                "Node": node_id, "Category": NODE_CATEGORIES.get(node.category, 'Unknown'),
-                "Infected": node.population['infected'], "Non-Infected": node.population['non_infected'], "Total": total
-            })
-    if data_rows:
-        st.dataframe(data_rows)
-    else:
-        st.write("No population present in any node at this step.")
+if 'simulation_instance' not in st.session_state:
+    st.session_state.simulation_instance = None
+
+if run_button:
+    # --- Collate all user choices into a single config dictionary ---
+    
+    # 1. Build the physics_params dictionary from user inputs
+    physics_params = {
+        'E': emission_rate,
+        'rho': 1.3e-4, # Breathing rate is fixed for this model
+        'categories': {}
+    }
+    # Define default volumes for each category (these could also be sliders)
+    default_volumes = {
+        'h': 150,      # Home volume from your list
+        'sh': 100,     # Shop volume
+        'p': 1000000,  # Park remains very large (effectively open air)
+        's': 200,      # School classroom volume
+        'r': 200,      # Restaurant volume
+        'c': 600,      # Church volume
+        't': 1200,     # Theater volume
+        'H': 400,      # Hospital room/ward volume
+        'o': 1000,     # Office floor volume
+        'st': 2000,    # Stadium section volume
+        'pa': 400      # Party venue volume
+    }
+    for cat_code, ach in ach_input.items():
+        physics_params['categories'][cat_code] = {
+            'V': default_volumes.get(cat_code, 500), # Default volume if not specified
+            'lambda': ach / 3600.0 # Convert ACH to lambda (per second)
+        }
+
+    # 2. Build the main config dictionary
+    user_config = {
+        'total_population': total_population,
+        'age_of_population': age_of_population,
+        'percentage_infected': percentage_infected,
+        'percentage_removed': percentage_removed,
+        'infectivity': infectivity, # This is now 'gamma' for the physics model
+        'time_of_incubation': time_of_incubation,
+        'time_of_activation': time_of_activation,
+        'percentage_of_death': percentage_of_death,
+        'detection_of_disease_rate': detection_of_disease_rate,
+        'physics_params': physics_params, # Add the newly created dictionary
+        'preventative_measures': {
+            'vaccination_percentage': vaccination_percentage,
+            'vaccination_effectiveness': vaccination_effectiveness,
+            'quarantine_on_detection': quarantine_on_detection,
+        },
+        'subgroup_sizes': subgroup_sizes,
+        'active_nodes': active_nodes,
+        'public_transport_on': public_transport_on
+    }
+    
+    # 3. Create and run the simulation
+    with st.spinner(f"Running simulation for {numb_of_days} days... This may take a while for large populations."):
+        sim = Simulation(user_config)
+        for i in range(numb_of_days):
+            sim.run_one_day()
+        st.session_state.simulation_instance = sim
+    st.success("Simulation Complete!")
+
+# --- Display results if a simulation has been run ---
+if st.session_state.simulation_instance:
+    sim = st.session_state.simulation_instance
+    
+    st.header("Simulation Results")
+    
+    # Create and display the main chart
+    history_df = pd.DataFrame(sim.history)
+    history_df['day'] = range(1, len(history_df) + 1)
+    
+    for state in ['susceptible', 'exposed', 'infectious', 'asymptomatic', 'removed', 'dead']:
+        if state not in history_df.columns:
+            history_df[state] = 0
+            
+    st.subheader("Disease State Over Time")
+    st.line_chart(
+        history_df,
+        x='day',
+        y=['susceptible', 'exposed', 'infectious', 'asymptomatic', 'removed', 'dead'],
+        color=['#1f77b4', '#ff7f0e', '#d62728', '#e377c2', '#2ca02c', '#000000']
+    )
+    
+    # Display final numbers
+    st.subheader("Final State")
+    final_counts = sim.history[-1]
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Susceptible", f"{final_counts.get('susceptible', 0):,}")
+    col2.metric("Total Exposed", f"{final_counts.get('exposed', 0):,}")
+    col3.metric("Total Infectious (Active)", f"{final_counts.get('infectious', 0) + final_counts.get('asymptomatic', 0):,}")
+    col4.metric("Total Removed/Immune", f"{final_counts.get('removed', 0):,}")
+    st.metric("Total Deaths", f"{final_counts.get('dead', 0):,}")
+
+else:
+    st.info("Configure your simulation in the sidebar and click 'Run Simulation' to begin.")
+
+if st.session_state.simulation_instance:
+    st.subheader("Detailed Simulation Log")
+    with st.expander("Click to see the turn-by-turn log"):
+        # Use st.code to display the log in a fixed-width, scrollable box
+        log_text = "\n".join(st.session_state.simulation_instance.log)
+        st.code(log_text, language=None)
