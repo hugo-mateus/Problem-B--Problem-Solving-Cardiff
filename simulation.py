@@ -3,17 +3,12 @@ import random
 import math
 from collections import defaultdict
 
-# =============================================================================
-# 1. Data Structures (The "Nouns" of the simulation)
-# =============================================================================
-
 class Person:
     """Represents a single individual agent in the simulation."""
     def __init__(self, person_id, neighborhood_id):
         self.id = person_id
         self.neighborhood_id = neighborhood_id
         
-        # --- Attributes to be filled in during initialization ---
         self.age_group = None  # '1-18', '18-64', '65+'
         self.employment = None # 'teacher', 'clerk', 'office_worker', etc.
         
@@ -22,11 +17,9 @@ class Person:
         self.days_in_state = 0
         self.is_vaccinated = False
         self.is_quarantined = False
-        
-        # --- THIS IS THE FIX ---
+    
         self.is_detected = False # Has the person been detected as sick?
 
-        # Location and Assignment
         self.home_id = None
         self.work_id = None
         self.location_id = None
@@ -39,9 +32,6 @@ class Node:
         self.neighborhood_id = neighborhood_id
         self.people_ids = set() # Set of person_ids currently at this node
 
-# =============================================================================
-# 2. The Main Simulation Engine
-# =============================================================================
 
 class Simulation:
     """The main class that orchestrates the entire simulation."""
@@ -65,7 +55,6 @@ class Simulation:
 
 
     def _create_world(self):
-        # This function follows the user's plan to build the simulation world
         print("--- Initializing Simulation World ---")
         
         # 1. Calculate world structure
@@ -374,14 +363,11 @@ class Simulation:
         if not susceptible or not infectious_people:
             return
 
-        # --- Wells-Riley Model Implementation ---
-        t = duration_hours * 3600.0
+        t = 3600.0
         N_I = len(infectious_people)
         
-        # Use specific parameters for the aggregate node (e.g., a bus or train car)
-        # These are assumptions for the template
-        V = 80  # Volume of a bus/train car in m^3
-        lambda_rate = 15.0 / 3600.0 # Good ventilation (15 ACH)
+        V = 80
+        lambda_rate = 15.0 / 3600.0
         
         E = self.config['physics_params']['E']
         rho = self.config['physics_params']['rho']

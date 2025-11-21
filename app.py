@@ -40,7 +40,7 @@ with st.sidebar.form(key='config_form'):
     # --- NEW: Section 3: Environment & Physics ---
     with st.expander("Environment & Physics (Wells-Riley Model)"):
         st.write("These parameters control the physical spread of airborne particles.")
-        emission_rate = st.slider("Particle Emission Rate (E)", 1.0, 20.0, 8.0, 0.5, help="Particles emitted per second by an infected person.")
+        emission_rate = st.slider("Particle Emission Rate (E)", 0.0, 8.0, 1.0, 0.02, help="Particles emitted per second by an infected person.")
         
         st.markdown("---")
         st.write("Ventilation Rate (Air Changes per Hour - ACH)")
