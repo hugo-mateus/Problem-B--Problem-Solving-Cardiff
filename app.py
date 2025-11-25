@@ -1,7 +1,8 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import math
+import numpy as np
+import scipy.stats as stats
 
 # Import the main class from your updated simulation.py
 try:
@@ -13,42 +14,97 @@ except ImportError:
 st.set_page_config(layout="wide", page_title="Comprehensive City Simulation")
 st.title("Multi-Scale City Infection Sandbox")
 
+
+def run_monte_carlo(num_runs, config, num_days_to_simulate):
+    """
+    Runs a Monte Carlo simulation for a given configuration.
+
+    Args:
+        num_runs (int): The number of times to run the simulation (e.g., 100).
+        config (dict): The configuration dictionary for the simulation.
+        num_days_to_simulate (int): The number of days each simulation run should last.
+
+    Returns:
+        dict: A dictionary containing the mean, standard deviation, and confidence interval.
+    """
+    
+    st.info(f"Starting Monte Carlo simulation with {num_runs} runs...")
+    
+    final_exposed_counts = []
+    progress_bar = st.progress(0)
+
+    for i in range(num_runs):
+        sim = Simulation(config)
+        sim.run_simulation(days=num_days_to_simulate)
+        final_results = sim.get_results()
+        exposed_count = final_results.get('exposed', 0)
+        final_exposed_counts.append(exposed_count)
+        progress_bar.progress((i + 1) / num_runs)
+
+    st.success("Monte Carlo simulation complete!")
+
+    results_array = np.array(final_exposed_counts)
+    mean_exposed = np.mean(results_array)
+    std_dev_exposed = np.std(results_array)
+    
+    confidence_interval = stats.t.interval(
+        confidence=0.95,
+        df=len(results_array) - 1,
+        loc=mean_exposed,
+        scale=stats.sem(results_array)
+    )
+    
+    if np.isnan(confidence_interval[0]) or np.isnan(confidence_interval[1]):
+        error_margin = 0.0
+    else:
+        error_margin = (confidence_interval[1] - confidence_interval[0]) / 2.0
+
+    stats_results = {
+        "mean": mean_exposed,
+        "std_dev": std_dev_exposed,
+        "confidence_interval_95": confidence_interval,
+        "error_margin": error_margin,
+        "all_runs": final_exposed_counts
+    }
+    
+    return stats_results
+
 # =============================================================================
 # Sidebar for User Configuration
 # =============================================================================
 st.sidebar.header("Simulation Configuration")
 
 with st.sidebar.form(key='config_form'):
-    st.write("Set your parameters and click 'Run Simulation' at the bottom.")
+    st.write("Set your parameters and click a 'Run' button on the main page.")
 
     # --- Section 1: Population & Initial State ---
     with st.expander("Population & Initial State", expanded=True):
         total_population = st.slider("Total Population", 1000, 50000, 10000, 1000)
         age_of_population = st.selectbox("Population Age Structure", ['medium', 'young', 'old'])
-        percentage_infected = st.slider("Initial Infected (%)", 0.0, 10.0, 1.0, 0.1) / 100.0
-        percentage_removed = st.slider("Initial Immune/Removed (%)", 0.0, 50.0, 5.0, 1.0) / 100.0
+        percentage_infected = st.slider("Initial Infected (%)", 0.0, 10.0, 0.5, 0.1) / 100.0
+        percentage_removed = st.slider("Initial Immune/Removed (%)", 0.0, 50.0, 0.0, 1.0) / 100.0
 
     # --- Section 2: Disease Characteristics ---
     with st.expander("Disease Characteristics"):
-        # The user-controlled infectivity 'gamma' from the formula
-        infectivity = st.slider("Disease Infectivity (γ)", 0.001, 0.5, 0.05, 0.001, format="%.3f")
+        infectivity = st.slider("Disease Infectivity (γ)", 0.0, 1.0, 0.2, 0.01, help="For Wells-Riley with quanta, this should be 1.0")
         time_of_incubation = st.slider("Incubation Time (days)", 1, 14, 3)
         time_of_activation = st.slider("Infection Duration (days)", 3, 30, 10)
-        percentage_of_death = st.slider("Mortality Rate (%)", 0.0, 10.0, 1.0, 0.1) / 100.0
-        detection_of_disease_rate = st.slider("Daily Detection Rate for Symptomatic (%)", 0.0, 100.0, 50.0, 1.0) / 100.0
+        percentage_of_death = st.slider("Mortality Rate (%)", 0.0, 10.0, 0.3, 0.1) / 100.0
+        detection_of_disease_rate = st.slider("Daily Detection Rate for Symptomatic (%)", 0.0, 100.0, 25.0, 1.0) / 100.0
 
-    # --- NEW: Section 3: Environment & Physics ---
+    # --- Section 3: Environment & Physics ---
     with st.expander("Environment & Physics (Wells-Riley Model)"):
-        st.write("These parameters control the physical spread of airborne particles.")
-        emission_rate = st.slider("Particle Emission Rate (E)", 0.0, 0.2, 0.02, 0.001, help="Particles emitted per second by an infected person.")
+        st.write("Quanta Emission Rate (per HOUR)")
+        E_low_hourly = st.number_input("Low Activity (Breathing)", value=0.01, min_value=0.0)
+        E_medium_hourly = st.number_input("Medium Activity (Speaking)", value=0.05, min_value=0.0)
+        E_high_hourly = st.number_input("High Activity (Singing/Shouting)", value=0.1, min_value=0.0)
         
         st.markdown("---")
         st.write("Ventilation Rate (Air Changes per Hour - ACH)")
-        # We define default ACH values which the user can then override.
-        default_achs = {'h': 0.5, 'sh': 4.0, 'p': 0.1, 's': 3.0, 'r': 8.0, 'c': 1.0, 't': 6.0, 'H': 12.0, 'o': 6.0, 'st': 8.0, 'pa': 2.0}
+        default_achs = {'h': 0.5, 'sh': 5.0, 'p': 0.1, 's': 3.0, 'r': 4.0, 'c': 1.0, 't': 6.0, 'H': 6.0, 'o': 2.0, 'st': 8.0, 'pa': 2.0}
         ach_input = {}
         for cat_code, default_ach in default_achs.items():
-            ach_input[cat_code] = st.slider(f"Ventilation for {cat_code.capitalize()}", 0.1, 60.0, default_ach, 0.1)
+            ach_input[cat_code] = st.slider(f"Ventilation for {cat_code.upper()}", 0.1, 20.0, default_ach, 0.1)
     
     with st.expander("Room/Group Sizes"):
         st.write("Control how many people mix in large locations.")
@@ -62,8 +118,6 @@ with st.sidebar.form(key='config_form'):
         subgroup_sizes['t'] = st.slider("People per Section (Theaters)", 20, 200, 75, 5)
         subgroup_sizes['c'] = st.slider("People per Group (Churches)", 10, 100, 50, 5)
 
-
-
     # --- Section 4: Interventions & Policies ---
     with st.expander("Interventions & Policies"):
         vaccination_percentage = st.slider("Vaccination Coverage (%)", 0.0, 100.0, 0.0, 5.0) / 100.0
@@ -73,63 +127,51 @@ with st.sidebar.form(key='config_form'):
     with st.expander("Lockdown Policies (Turn On/Off Locations)"):
         active_nodes = {}
         for cat in ['o', 'sh', 'r', 'st', 'pa', 't', 'c', 's']:
-            active_nodes[cat] = st.checkbox(f"Allow {cat.capitalize()} to be open", True)
+            active_nodes[cat] = st.checkbox(f"Allow {cat.upper()} to be open", True)
         public_transport_on = st.checkbox("Public Transport Open", True)
 
     # --- Section 5: Simulation Duration ---
-    st.subheader("Simulation Duration")
-    numb_of_days = st.slider("Number of Days to Simulate", 1, 100, 30)
+    st.subheader("Single Simulation Duration")
+    numb_of_days = st.slider("Number of Days to Simulate", 1, 100, 3)
     
-    run_button = st.form_submit_button(label="Run Simulation")
+    run_button = st.form_submit_button(label="Run Single Simulation")
 
 # =============================================================================
-# Main Application Logic
+# Central function to gather UI settings
 # =============================================================================
-
-if 'simulation_instance' not in st.session_state:
-    st.session_state.simulation_instance = None
-
-if run_button:
-    # --- Collate all user choices into a single config dictionary ---
+def get_config_from_ui():
+    """Gathers all settings from the Streamlit UI and returns a config dictionary."""
     
-    # 1. Build the physics_params dictionary from user inputs
     physics_params = {
-        'E': emission_rate,
-        'rho': 1.3e-4, # Breathing rate is fixed for this model
+        'rho': 1.3e-4,
+        'E_hourly': {
+            'low': E_low_hourly,
+            'medium': E_medium_hourly,
+            'high': E_high_hourly
+        },
         'categories': {}
     }
-    # Define default volumes for each category (these could also be sliders)
     default_volumes = {
-        'h': 150,      # Home volume from your list
-        'sh': 100,     # Shop volume
-        'p': 1000000,  # Park remains very large (effectively open air)
-        's': 200,      # School classroom volume
-        'r': 200,      # Restaurant volume
-        'c': 600,      # Church volume
-        't': 1200,     # Theater volume
-        'H': 400,      # Hospital room/ward volume
-        'o': 1000,     # Office floor volume
-        'st': 2000,    # Stadium section volume
-        'pa': 400      # Party venue volume
+        'h': 150, 'sh': 100, 'p': 1000000, 's': 200, 'r': 200, 'c': 600,
+        't': 1200, 'H': 400, 'o': 1000, 'st': 2000, 'pa': 400
     }
     for cat_code, ach in ach_input.items():
         physics_params['categories'][cat_code] = {
-            'V': default_volumes.get(cat_code, 500), # Default volume if not specified
-            'lambda': ach / 3600.0 # Convert ACH to lambda (per second)
+            'V': default_volumes.get(cat_code, 500),
+            'lambda': ach / 3600.0
         }
 
-    # 2. Build the main config dictionary
-    user_config = {
+    config = {
         'total_population': total_population,
         'age_of_population': age_of_population,
         'percentage_infected': percentage_infected,
         'percentage_removed': percentage_removed,
-        'infectivity': infectivity, # This is now 'gamma' for the physics model
+        'infectivity': infectivity,
         'time_of_incubation': time_of_incubation,
         'time_of_activation': time_of_activation,
         'percentage_of_death': percentage_of_death,
         'detection_of_disease_rate': detection_of_disease_rate,
-        'physics_params': physics_params, # Add the newly created dictionary
+        'physics_params': physics_params,
         'preventative_measures': {
             'vaccination_percentage': vaccination_percentage,
             'vaccination_effectiveness': vaccination_effectiveness,
@@ -139,22 +181,59 @@ if run_button:
         'active_nodes': active_nodes,
         'public_transport_on': public_transport_on
     }
+    return config
+
+# =============================================================================
+# Main Application Logic
+# =============================================================================
+
+# --- Monte Carlo Analysis Section ---
+st.header("Monte Carlo Analysis")
+st.markdown("Run the simulation multiple times to get an average outcome and error margin.")
+num_mc_runs = st.number_input("Number of simulation runs", min_value=10, max_value=1000, value=100)
+num_sim_days_mc = st.number_input("Number of days to simulate per run", min_value=1, max_value=100, value=3)
+
+if st.button("Run Monte Carlo Analysis"):
+    current_config = get_config_from_ui()
+    analysis_results = run_monte_carlo(num_mc_runs, current_config, num_sim_days_mc)
     
-    # 3. Create and run the simulation
-    with st.spinner(f"Running simulation for {numb_of_days} days... This may take a while for large populations."):
+    st.subheader("Analysis Results")
+    mean = analysis_results['mean']
+    error = analysis_results['error_margin']
+    
+    st.metric(
+        label="Average Exposed People (at end of simulation)",
+        value=f"{mean:.1f}",
+        delta=f"± {error:.1f} (95% confidence)",
+        delta_color="off"
+    )
+    st.write(f"Standard Deviation: **{analysis_results['std_dev']:.2f}**")
+    
+    st.subheader("Distribution of Outcomes")
+    df = pd.DataFrame(analysis_results['all_runs'], columns=["Final Exposed Count"])
+    st.bar_chart(df)
+
+st.markdown("---")
+
+# --- Single Simulation Run Logic ---
+if 'simulation_instance' not in st.session_state:
+    st.session_state.simulation_instance = None
+
+if run_button:
+    user_config = get_config_from_ui()
+    
+    with st.spinner(f"Running simulation for {numb_of_days} days..."):
         sim = Simulation(user_config)
-        for i in range(numb_of_days):
-            sim.run_one_day()
+        sim.run_simulation(days=numb_of_days)
         st.session_state.simulation_instance = sim
-    st.success("Simulation Complete!")
+    st.success("Single Simulation Complete!")
 
 # --- Display results if a simulation has been run ---
 if st.session_state.simulation_instance:
     sim = st.session_state.simulation_instance
     
-    st.header("Simulation Results")
+    st.header("Single Simulation Results")
     
-    # Create and display the main chart
     history_df = pd.DataFrame(sim.history)
     history_df['day'] = range(1, len(history_df) + 1)
     
@@ -170,7 +249,6 @@ if st.session_state.simulation_instance:
         color=['#1f77b4', '#ff7f0e', '#d62728', '#e377c2', '#2ca02c', '#000000']
     )
     
-    # Display final numbers
     st.subheader("Final State")
     final_counts = sim.history[-1]
     
@@ -181,12 +259,10 @@ if st.session_state.simulation_instance:
     col4.metric("Total Removed/Immune", f"{final_counts.get('removed', 0):,}")
     st.metric("Total Deaths", f"{final_counts.get('dead', 0):,}")
 
-else:
-    st.info("Configure your simulation in the sidebar and click 'Run Simulation' to begin.")
-
-if st.session_state.simulation_instance:
     st.subheader("Detailed Simulation Log")
     with st.expander("Click to see the turn-by-turn log"):
-        # Use st.code to display the log in a fixed-width, scrollable box
         log_text = "\n".join(st.session_state.simulation_instance.log)
         st.code(log_text, language=None)
+
+else:
+    st.info("Configure your simulation in the sidebar and click 'Run Single Simulation' or 'Run Monte Carlo Analysis' to begin.")

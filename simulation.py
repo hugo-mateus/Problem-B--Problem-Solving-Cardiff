@@ -53,7 +53,6 @@ class Simulation:
         """Adds a formatted message to the simulation log."""
         self.log.append(message)
 
-
     def _create_world(self):
         print("--- Initializing Simulation World ---")
         
@@ -162,7 +161,6 @@ class Simulation:
                 # Fallback for people whose workplace doesn't exist (e.g., all shops are closed)
                 person.work_id = person.home_id
 
-
     def _set_initial_states(self):
         person_ids = list(self.people.keys())
         random.shuffle(person_ids)
@@ -194,9 +192,6 @@ class Simulation:
         self._move_and_infect('social')
         self._move_and_infect('home')
         self._record_history()
-
-
-# In simulation.py, replace the existing _move_and_infect and _apply_infection_in_node methods with these.
 
     def _move_and_infect(self, turn_type):
         """
@@ -300,7 +295,6 @@ class Simulation:
             elif total_pop > 1:
                 self._apply_infection_in_node(node, duration_hours)
 
-
     def _apply_infection_in_node(self, node, duration_hours):
         """
         Calculates and applies infection probability in a specific node (or temporary room)
@@ -314,7 +308,6 @@ class Simulation:
         if not susceptible or not infectious_people:
             return 0 # Return 0 as no new infections occurred
 
-        # --- Wells-Riley Model Implementation ---
         t = duration_hours * 3600.0
         N_I = len(infectious_people)
         
@@ -324,7 +317,7 @@ class Simulation:
         V = category_params['V']
         lambda_rate = category_params['lambda']
         
-        E = self.config['physics_params']['E']
+        E = self.config['physics_params']['E_hourly']['medium'] # Assuming 'medium' activity for public transport or general node
         rho = self.config['physics_params']['rho']
         gamma = self.config['infectivity']
 
@@ -351,7 +344,6 @@ class Simulation:
 
         return newly_infected_count
 
-
     def _apply_infection_in_aggregate_node(self, agg_node, people_group, duration_hours):
         """
         Applies infection for non-node groups (like public transport)
@@ -369,7 +361,7 @@ class Simulation:
         V = 80
         lambda_rate = 15.0 / 3600.0
         
-        E = self.config['physics_params']['E']
+        E = self.config['physics_params']['E_hourly']['medium'] # Assuming 'medium' activity for public transport or general node
         rho = self.config['physics_params']['rho']
         gamma = self.config['infectivity']
 
@@ -386,7 +378,6 @@ class Simulation:
             if random.random() < prob:
                 person.disease_state = 'exposed'
                 person.days_in_state = 0
-
 
     def _update_disease_progression(self):
         for person in self.people.values():
@@ -418,3 +409,17 @@ class Simulation:
             counts[p.disease_state] += 1
         self.history.append(counts)
 
+
+    def run_simulation(self, days):
+        """Runs the full simulation for a given number of days."""
+        for day in range(days):
+            # Assuming your run_one_day method handles the daily cycle
+            self.run_one_day() 
+    
+    def get_results(self):
+        """Returns the final count of people in each state."""
+        counts = {"susceptible": 0, "exposed": 0, "infectious": 0, "asymptomatic": 0, "recovered": 0, "dead": 0}
+        for person in self.people.values():
+            if person.disease_state in counts:
+                counts[person.disease_state] += 1
+        return counts
