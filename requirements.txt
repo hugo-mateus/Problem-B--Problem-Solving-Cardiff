@@ -2,3 +2,4 @@ streamlit
 networkx
 pyvis
 matplotlib
+scipy.stats
