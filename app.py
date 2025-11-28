@@ -103,7 +103,7 @@ with st.sidebar.form(key='config_form'):
 
     # --- Section 2: Disease Characteristics ---
     with st.expander("Disease Characteristics"):
-        infectivity = st.slider("Disease Infectivity (γ)", 0.0, 1.0, 0.2, 0.01, help="For Wells-Riley with quanta, this should be 1.0")
+        infectivity = st.slider("Disease Infectivity (γ)", 0.0, 1.0, 0.5, 0.01, help="For Wells-Riley with quanta, this should be 1.0")
         time_of_incubation = st.slider("Incubation Time (days)", 1, 14, 3)
         time_of_activation = st.slider("Infection Duration (days)", 3, 30, 10)
         percentage_of_death = st.slider("Mortality Rate (%)", 0.0, 10.0, 0.3, 0.1) / 100.0
@@ -113,8 +113,8 @@ with st.sidebar.form(key='config_form'):
     with st.expander("Environment & Physics (Wells-Riley Model)"):
         st.write("Quanta Emission Rate (per HOUR)")
         E_low_hourly = st.number_input("Low Activity (Breathing)", value=0.002, min_value=0.0, step=0.001, format="%.2f")
-        E_medium_hourly = st.number_input("Medium Activity (Speaking)", value=0.01, min_value=0.0, step=0.01, format="%.2f")
-        E_high_hourly = st.number_input("High Activity (Singing/Shouting)", value=0.02, min_value=0.0, step=0.01, format="%.2f")
+        E_medium_hourly = st.number_input("Medium Activity (Speaking)", value=0.003, min_value=0.0, step=0.001, format="%.2f")
+        E_high_hourly = st.number_input("High Activity (Singing/Shouting)", value=0.01, min_value=0.0, step=0.001, format="%.2f")
         
         st.markdown("---")
         st.write("Ventilation Rate (Air Changes per Hour - ACH)")
