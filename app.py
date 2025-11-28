@@ -23,13 +23,9 @@ def run_monte_carlo(num_runs, config, num_days_to_simulate):
     
     st.info(f"Starting Monte Carlo simulation with {num_runs} runs...")
     
-    # --- MODIFICATION START ---
-    # Create lists to store the final counts from each run
     final_exposed_counts = []
     final_susceptible_counts = []
-    final_infectious_counts = [] # New list for active infections
-    
-    # --- MODIFICATION END ---
+    final_infectious_counts = [] 
 
     progress_bar = st.progress(0)
 
@@ -38,24 +34,18 @@ def run_monte_carlo(num_runs, config, num_days_to_simulate):
         sim.run_simulation(days=num_days_to_simulate)
         final_results = sim.get_results()
         
-        # --- MODIFICATION START ---
-        # Get all required counts
         exposed_count = final_results.get('exposed', 0)
         susceptible_count = final_results.get('susceptible', 0)
-        # Calculate total active infectious people
         infectious_count = final_results.get('infectious', 0) + final_results.get('asymptomatic', 0)
         
-        # Store the results
         final_exposed_counts.append(exposed_count)
         final_susceptible_counts.append(susceptible_count)
         final_infectious_counts.append(infectious_count)
-        # --- MODIFICATION END ---
         
         progress_bar.progress((i + 1) / num_runs)
 
     st.success("Monte Carlo simulation complete!")
 
-    # --- Calculate Statistics for each group ---
     def calculate_stats(data_array):
         mean = np.mean(data_array)
         ci = stats.t.interval(confidence=0.95, df=len(data_array)-1, loc=mean, scale=stats.sem(data_array))
@@ -64,9 +54,7 @@ def run_monte_carlo(num_runs, config, num_days_to_simulate):
 
     mean_exposed, error_margin_exposed, all_exposed = calculate_stats(np.array(final_exposed_counts))
     mean_susceptible, error_margin_susceptible, all_susceptible = calculate_stats(np.array(final_susceptible_counts))
-    # --- MODIFICATION START ---
     mean_infectious, error_margin_infectious, all_infectious = calculate_stats(np.array(final_infectious_counts))
-    # --- MODIFICATION END ---
 
     stats_results = {
         "exposed_mean": mean_exposed,
@@ -77,17 +65,15 @@ def run_monte_carlo(num_runs, config, num_days_to_simulate):
         "susceptible_error_margin": error_margin_susceptible,
         "susceptible_all_runs": all_susceptible,
 
-        # --- MODIFICATION START ---
         "infectious_mean": mean_infectious,
         "infectious_error_margin": error_margin_infectious,
         "infectious_all_runs": all_infectious
-        # --- MODIFICATION END ---
     }
     
     return stats_results
 
 # =============================================================================
-# Sidebar for User Configuration (No changes needed here)
+# Sidebar for User Configuration
 # =============================================================================
 st.sidebar.header("Simulation Configuration")
 
@@ -112,9 +98,9 @@ with st.sidebar.form(key='config_form'):
     # --- Section 3: Environment & Physics ---
     with st.expander("Environment & Physics (Wells-Riley Model)"):
         st.write("Quanta Emission Rate (per HOUR)")
-        E_low_hourly = st.number_input("Low Activity (Breathing)", value=0.002, min_value=0.0, step=0.001, format="%.2f")
-        E_medium_hourly = st.number_input("Medium Activity (Speaking)", value=0.003, min_value=0.0, step=0.001, format="%.2f")
-        E_high_hourly = st.number_input("High Activity (Singing/Shouting)", value=0.01, min_value=0.0, step=0.001, format="%.2f")
+        E_low_hourly = st.number_input("Low Activity (Breathing)", value=0.002, min_value=0.0, step=0.001, format="%.3f")
+        E_medium_hourly = st.number_input("Medium Activity (Speaking)", value=0.003, min_value=0.0, step=0.001, format="%.3f")
+        E_high_hourly = st.number_input("High Activity (Singing/Shouting)", value=0.01, min_value=0.0, step=0.001, format="%.3f")
         
         st.markdown("---")
         st.write("Ventilation Rate (Air Changes per Hour - ACH)")
@@ -123,13 +109,12 @@ with st.sidebar.form(key='config_form'):
         for cat_code, default_ach in default_achs.items():
             ach_input[cat_code] = st.slider(f"Ventilation for {cat_code.upper()}", 0.1, 20.0, default_ach, 0.1)
     
-    # ... (rest of sidebar is unchanged) ...
     with st.expander("Room/Group Sizes"):
         st.write("Control how many people mix in large locations.")
         subgroup_sizes = {}
         subgroup_sizes['s'] = st.slider("People per Classroom (Schools)", 10, 100, 30, 5)
         subgroup_sizes['o'] = st.slider("People per Floor (Offices)", 10, 200, 50, 5)
-        # ...
+        # (Assuming other subgroup sliders would be here)
 
     with st.expander("Interventions & Policies"):
         vaccination_percentage = st.slider("Vaccination Coverage (%)", 0.0, 100.0, 0.0, 5.0) / 100.0
@@ -148,10 +133,9 @@ with st.sidebar.form(key='config_form'):
     run_button = st.form_submit_button(label="Run Single Simulation")
 
 # =============================================================================
-# Central function to gather UI settings (Unchanged)
+# Central function to gather UI settings
 # =============================================================================
 def get_config_from_ui():
-    # This function remains the same as before
     physics_params = {
         'rho': 1.3e-4,
         'E_hourly': {'low': E_low_hourly, 'medium': E_medium_hourly, 'high': E_high_hourly},
@@ -187,46 +171,26 @@ if st.button("Run Monte Carlo Analysis"):
     
     st.subheader("Analysis Results")
     
-    # --- MODIFICATION START: Display all three metrics ---
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric(
-            label="Average Susceptible",
-            value=f"{analysis_results['susceptible_mean']:.1f}",
-            delta=f"± {analysis_results['susceptible_error_margin']:.1f}",
-            delta_color="off"
-        )
-    
+        st.metric(label="Average Susceptible", value=f"{analysis_results['susceptible_mean']:.1f}", delta=f"± {analysis_results['susceptible_error_margin']:.1f}", delta_color="off")
     with col2:
-        st.metric(
-            label="Average Exposed",
-            value=f"{analysis_results['exposed_mean']:.1f}",
-            delta=f"± {analysis_results['exposed_error_margin']:.1f}",
-            delta_color="off"
-        )
-
+        st.metric(label="Average Exposed", value=f"{analysis_results['exposed_mean']:.1f}", delta=f"± {analysis_results['exposed_error_margin']:.1f}", delta_color="off")
     with col3:
-        st.metric(
-            label="Average Active Infections",
-            value=f"{analysis_results['infectious_mean']:.1f}",
-            delta=f"± {analysis_results['infectious_error_margin']:.1f}",
-            delta_color="off"
-        )
+        st.metric(label="Average Active Infections", value=f"{analysis_results['infectious_mean']:.1f}", delta=f"± {analysis_results['infectious_error_margin']:.1f}", delta_color="off")
     
     st.subheader("Distribution of Outcomes")
-    # Create a DataFrame with all three sets of results for charting
     df_mc = pd.DataFrame({
         'Final Susceptible': analysis_results['susceptible_all_runs'],
         'Final Exposed': analysis_results['exposed_all_runs'],
         'Final Active Infections': analysis_results['infectious_all_runs']
     })
     st.bar_chart(df_mc)
-    # --- MODIFICATION END ---
 
 st.markdown("---")
 
-# --- Single Simulation Run Logic (Unchanged) ---
+# --- Single Simulation Run Logic ---
 if 'simulation_instance' not in st.session_state:
     st.session_state.simulation_instance = None
 
@@ -238,15 +202,32 @@ if run_button:
         st.session_state.simulation_instance = sim
     st.success("Single Simulation Complete!")
 
-# --- Display results if a simulation has been run (Unchanged) ---
+# --- Display results if a simulation has been run ---
 if st.session_state.simulation_instance:
     sim = st.session_state.simulation_instance
     st.header("Single Simulation Results")
+    
     history_df = pd.DataFrame(sim.history)
     history_df['day'] = range(1, len(history_df) + 1)
     
+    # --- START OF THE FIX ---
+    # Define all possible states that should be in the chart
+    all_states_to_plot = ['susceptible', 'exposed', 'infectious', 'asymptomatic', 'removed', 'dead']
+    
+    # Check for each state. If the column doesn't exist in the DataFrame, create it and fill with 0.
+    for state in all_states_to_plot:
+        if state not in history_df.columns:
+            history_df[state] = 0
+    # --- END OF THE FIX ---
+            
     st.subheader("Disease State Over Time")
-    st.line_chart(history_df, x='day', y=['susceptible', 'exposed', 'infectious', 'asymptomatic', 'removed', 'dead'])
+    # Now this line is safe, because we've guaranteed all the columns exist.
+    st.line_chart(
+        history_df,
+        x='day',
+        y=all_states_to_plot,
+        color=['#1f77b4', '#ff7f0e', '#d62728', '#e377c2', '#2ca02c', '#000000']
+    )
     
     st.subheader("Final State")
     final_counts = sim.history[-1]
